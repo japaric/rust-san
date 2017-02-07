@@ -511,6 +511,7 @@ fn foo() {}
 fn bar() {}
 ```
 
+```
 $ RUSTFLAGS="-Z sanitizer=thread" xargo test --target x86_64-unknown-linux-gnu                                                                                                                                   <<<
      Running target/x86_64-unknown-linux-gnu/debug/deps/test_runner-d861d6557762b235
 
@@ -724,6 +725,7 @@ SUMMARY: ThreadSanitizer: data race ($PWD/target/x86_64-unknown-linux-gnu/debug/
 ==================
 ThreadSanitizer: reported 3 warnings
 error: test failed
+```
 
 # License
 
