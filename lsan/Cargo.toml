@@ -1,0 +1,7 @@
+[package]
+authors = ["Jorge Aparicio <japaricious@gmail.com>"]
+name = "lsan"
+version = "0.1.0"
+
+[profile.dev]
+opt-level = 1
