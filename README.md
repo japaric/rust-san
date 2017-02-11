@@ -10,6 +10,7 @@
     - [Use after free](#use-after-free)
   - [LeakSanitizer](#leaksanitizer)
     - [Memory leak](#memory-leak)
+    - [Rc cycle](#rc-cycle)
   - [MemorySanitizer](#memorysanitizer)
     - [Uninitialized read](#uninitialized-read)
   - [ThreadSanitizer](#threadsanitizer)
@@ -53,8 +54,9 @@ $ RUSTFLAGS="-Z sanitizer=$SAN" cargo test --target x86_64-unknown-linux-gnu
 
 Where `$SAN` is one of `address`, `leak`, `memory` or `thread`.
 
-Be sure to always pass `--target x86_64-unknown-linux-gnu` to Cargo or you'll
-end up sanitizing the build scripts that Cargo runs.
+Be sure to **always** pass `--target x86_64-unknown-linux-gnu` to Cargo or else
+you'll end up sanitizing the build scripts that Cargo runs or run into
+compilation error if your crate depends on a dylib.
 
 ## Examples
 
@@ -250,6 +252,54 @@ Direct leak of 16 byte(s) in 1 object(s) allocated from:
     #3 0x56322c0df896 in __rust_maybe_catch_panic ($PWD/target/x86_64-unknown-linux-gnu/debug/examples/memory-leak+0x3d896)
 
 SUMMARY: LeakSanitizer: 16 byte(s) leaked in 1 allocation(s).
+```
+
+#### Rc cycle
+
+`lsan/examples/rc-cycle.rs`
+
+``` rust
+use std::cell::RefCell;
+use std::rc::Rc;
+
+#[derive(Clone)]
+struct Cycle {
+    cell: RefCell<Option<Rc<Cycle>>>,
+}
+
+impl Drop for Cycle {
+    fn drop(&mut self) {
+        println!("freed");
+    }
+}
+
+fn main() {
+    let cycle = Rc::new(Cycle { cell: RefCell::new(None)});
+    *cycle.cell.borrow_mut() = Some(cycle.clone());
+}
+```
+
+```
+$ ( cd lsan && \
+    RUSTFLAGS="-Z sanitizer=leak" cargo run --target x86_64-unknown-linux-gnu --example rc-cycle )
+    Finished dev [optimized + debuginfo] target(s) in 0.0 secs
+     Running `target/x86_64-unknown-linux-gnu/debug/examples/rc-cycle`
+
+=================================================================
+==16344==ERROR: LeakSanitizer: detected memory leaks
+
+Direct leak of 32 byte(s) in 1 object(s) allocated from:
+    #0 0x556812c577ca in __interceptor_malloc $RUST_SRC/src/compiler-rt/lib/lsan/lsan_interceptors.cc:55
+    #1 0x556812c52c3a in alloc::heap::exchange_malloc::h55adee8e9fba9338 $RUST_SRC/src/liballoc/heap.rs:138
+    #2 0x556812c5254e in _$LT$alloc..rc..Rc$LT$T$GT$$GT$::new::h63d403f2e66d1e71 $RUST_SRC/src/liballoc/rc.rs:293
+    #3 0x556812c52d44 in rc_cycle::main::hee2857f96ac2db92 $PWD/examples/rc-cycle.rs:16
+    #4 0x556812c8614a in __rust_maybe_catch_panic $RUST_SRC/src/libpanic_unwind/lib.rs:98
+    #5 0x556812c7ed06 in std::panicking::try<(),fn()> $RUST_SRC/src/libstd/panicking.rs:436
+    #6 0x556812c7ed06 in std::panic::catch_unwind<fn(),()> $RUST_SRC/src/libstd/panic.rs:361
+    #7 0x556812c7ed06 in std::rt::lang_start::hb7fc7ec87b663023 $RUST_SRC/src/libstd/rt.rs:57
+    #8 0x7f9a53e0f290 in __libc_start_main (/usr/lib/libc.so.6+0x20290)
+
+SUMMARY: LeakSanitizer: 32 byte(s) leaked in 1 allocation(s).
 ```
 
 ### MemorySanitizer
@@ -512,220 +562,110 @@ fn bar() {}
 ```
 
 ```
-$ RUSTFLAGS="-Z sanitizer=thread" xargo test --target x86_64-unknown-linux-gnu                                                                                                                                   <<<
-     Running target/x86_64-unknown-linux-gnu/debug/deps/test_runner-d861d6557762b235
+$ RUSTFLAGS="-Z sanitizer=thread" cargo test --target x86_64-unknown-linux-gnu
+     Running target/x86_64-unknown-linux-gnu/debug/deps/foo-aacd724200d968b7
 
 running 2 tests
+==================
+WARNING: ThreadSanitizer: data race (pid=3733)
+  Read of size 8 at 0x7c7800006f28 by main thread:
+    #0 memcpy $RUST_SRC/src/compiler-rt/lib/tsan/../sanitizer_common/sanitizer_common_interceptors.inc:598 (foo-aacd724200d968b7+0x000000056009)
+    #1 memcpy $RUST_SRC/src/compiler-rt/lib/tsan/../sanitizer_common/sanitizer_common_interceptors.inc:590 (foo-aacd724200d968b7+0x000000056009)
+    #2 core::mem::swap<core::option::Option<(test::TestDesc, test::TestResult, collections::vec::Vec<u8>)>> $RUST_SRC/src/libcore/mem.rs:454 (foo-aacd724200d968b7+0x00000001adfe)
+    #3 core::mem::replace<core::option::Option<(test::TestDesc, test::TestResult, collections::vec::Vec<u8>)>> $RUST_SRC/src/libcore/mem.rs:518 (foo-aacd724200d968b7+0x00000001adfe)
+    #4 core::option::{{impl}}::take<(test::TestDesc, test::TestResult, collections::vec::Vec<u8>)> $RUST_SRC/src/libcore/option.rs:725 (foo-aacd724200d968b7+0x00000001adfe)
+    #5 _$LT$std..sync..mpsc..mpsc_queue..Queue$LT$T$GT$$GT$::pop::hd044437806ca7d86 $RUST_SRC/src/libstd/sync/mpsc/mpsc_queue.rs:126 (foo-aacd724200d968b7+0x00000001adfe)
+    #6 __rust_maybe_catch_panic $RUST_SRC/src/libpanic_unwind/lib.rs:98 (foo-aacd724200d968b7+0x0000000d8b0a)
+    #7 __libc_start_main <null> (libc.so.6+0x000000020290)
+
+  Previous write of size 8 at 0x7c7800006f28 by thread T1:
+    #0 malloc $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:591 (foo-aacd724200d968b7+0x000000061e1f)
+    #1 alloc::heap::allocate $RUST_SRC/src/liballoc/heap.rs:59 (foo-aacd724200d968b7+0x000000014bb2)
+    #2 alloc::heap::exchange_malloc $RUST_SRC/src/liballoc/heap.rs:138 (foo-aacd724200d968b7+0x000000014bb2)
+    #3 std::sync::mpsc::mpsc_queue::{{impl}}::new<(test::TestDesc, test::TestResult, collections::vec::Vec<u8>)> $RUST_SRC/src/libstd/sync/mpsc/mpsc_queue.rs:80 (foo-aacd724200d968b7+0x000000014bb2)
+    #4 std::sync::mpsc::mpsc_queue::{{impl}}::push<(test::TestDesc, test::TestResult, collections::vec::Vec<u8>)> $RUST_SRC/src/libstd/sync/mpsc/mpsc_queue.rs:101 (foo-aacd724200d968b7+0x000000014bb2)
+    #5 std::sync::mpsc::shared::{{impl}}::send<(test::TestDesc, test::TestResult, collections::vec::Vec<u8>)> $RUST_SRC/src/libstd/sync/mpsc/shared.rs:171 (foo-aacd724200d968b7+0x000000014bb2)
+    #6 _$LT$std..sync..mpsc..Sender$LT$T$GT$$GT$::send::h1f83562f10dffde2 $RUST_SRC/src/libstd/sync/mpsc/mod.rs:607 (foo-aacd724200d968b7+0x000000014bb2)
+
+  Location is heap block of size 224 at 0x7c7800006f20 allocated by thread T1:
+    #0 malloc $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:591 (foo-aacd724200d968b7+0x000000061e1f)
+    #1 alloc::heap::allocate $RUST_SRC/src/liballoc/heap.rs:59 (foo-aacd724200d968b7+0x000000014bb2)
+    #2 alloc::heap::exchange_malloc $RUST_SRC/src/liballoc/heap.rs:138 (foo-aacd724200d968b7+0x000000014bb2)
+    #3 std::sync::mpsc::mpsc_queue::{{impl}}::new<(test::TestDesc, test::TestResult, collections::vec::Vec<u8>)> $RUST_SRC/src/libstd/sync/mpsc/mpsc_queue.rs:80 (foo-aacd724200d968b7+0x000000014bb2)
+    #4 std::sync::mpsc::mpsc_queue::{{impl}}::push<(test::TestDesc, test::TestResult, collections::vec::Vec<u8>)> $RUST_SRC/src/libstd/sync/mpsc/mpsc_queue.rs:101 (foo-aacd724200d968b7+0x000000014bb2)
+    #5 std::sync::mpsc::shared::{{impl}}::send<(test::TestDesc, test::TestResult, collections::vec::Vec<u8>)> $RUST_SRC/src/libstd/sync/mpsc/shared.rs:171 (foo-aacd724200d968b7+0x000000014bb2)
+    #6 _$LT$std..sync..mpsc..Sender$LT$T$GT$$GT$::send::h1f83562f10dffde2 $RUST_SRC/src/libstd/sync/mpsc/mod.rs:607 (foo-aacd724200d968b7+0x000000014bb2)
+
+  Thread T1 'bar' (tid=3735, finished) created by main thread at:
+    #0 pthread_create $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:902 (foo-aacd724200d968b7+0x00000003b9a7)
+    #1 std::sys::imp::thread::Thread::new::h13e24a45e97a3e79 $RUST_SRC/src/libstd/sys/unix/thread.rs:72 (foo-aacd724200d968b7+0x0000000d0765)
+    #2 __rust_maybe_catch_panic $RUST_SRC/src/libpanic_unwind/lib.rs:98 (foo-aacd724200d968b7+0x0000000d8b0a)
+    #3 __libc_start_main <null> (libc.so.6+0x000000020290)
+
+SUMMARY: ThreadSanitizer: data race $RUST_SRC/src/libcore/mem.rs:454 in core::mem::swap<core::option::Option<(test::TestDesc, test::TestResult, collections::vec::Vec<u8>)>>
+==================
 test bar ... ok
+==================
+WARNING: ThreadSanitizer: data race (pid=3733)
+  Write of size 8 at 0x7c7800006f20 by main thread:
+    #0 free $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:634 (foo-aacd724200d968b7+0x00000003cf06)
+    #1 free $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:628 (foo-aacd724200d968b7+0x00000003cf06)
+    #2 _$LT$std..sync..mpsc..mpsc_queue..Queue$LT$T$GT$$GT$::pop::hd044437806ca7d86 $RUST_SRC/src/libstd/sync/mpsc/mpsc_queue.rs:127 (foo-aacd724200d968b7+0x00000001ae56)
+    #3 __rust_maybe_catch_panic $RUST_SRC/src/libpanic_unwind/lib.rs:98 (foo-aacd724200d968b7+0x0000000d8b0a)
+    #4 __libc_start_main <null> (libc.so.6+0x000000020290)
+
+  Previous write of size 8 at 0x7c7800006f20 by thread T1:
+    #0 malloc $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:591 (foo-aacd724200d968b7+0x000000061e1f)
+    #1 alloc::heap::allocate $RUST_SRC/src/liballoc/heap.rs:59 (foo-aacd724200d968b7+0x000000014bb2)
+    #2 alloc::heap::exchange_malloc $RUST_SRC/src/liballoc/heap.rs:138 (foo-aacd724200d968b7+0x000000014bb2)
+    #3 std::sync::mpsc::mpsc_queue::{{impl}}::new<(test::TestDesc, test::TestResult, collections::vec::Vec<u8>)> $RUST_SRC/src/libstd/sync/mpsc/mpsc_queue.rs:80 (foo-aacd724200d968b7+0x000000014bb2)
+    #4 std::sync::mpsc::mpsc_queue::{{impl}}::push<(test::TestDesc, test::TestResult, collections::vec::Vec<u8>)> $RUST_SRC/src/libstd/sync/mpsc/mpsc_queue.rs:101 (foo-aacd724200d968b7+0x000000014bb2)
+    #5 std::sync::mpsc::shared::{{impl}}::send<(test::TestDesc, test::TestResult, collections::vec::Vec<u8>)> $RUST_SRC/src/libstd/sync/mpsc/shared.rs:171 (foo-aacd724200d968b7+0x000000014bb2)
+    #6 _$LT$std..sync..mpsc..Sender$LT$T$GT$$GT$::send::h1f83562f10dffde2 $RUST_SRC/src/libstd/sync/mpsc/mod.rs:607 (foo-aacd724200d968b7+0x000000014bb2)
+
+  Thread T1 'bar' (tid=3735, finished) created by main thread at:
+    #0 pthread_create $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:902 (foo-aacd724200d968b7+0x00000003b9a7)
+    #1 std::sys::imp::thread::Thread::new::h13e24a45e97a3e79 $RUST_SRC/src/libstd/sys/unix/thread.rs:72 (foo-aacd724200d968b7+0x0000000d0765)
+    #2 __rust_maybe_catch_panic $RUST_SRC/src/libpanic_unwind/lib.rs:98 (foo-aacd724200d968b7+0x0000000d8b0a)
+    #3 __libc_start_main <null> (libc.so.6+0x000000020290)
+
+SUMMARY: ThreadSanitizer: data race $RUST_SRC/src/libstd/sync/mpsc/mpsc_queue.rs:127 in _$LT$std..sync..mpsc..mpsc_queue..Queue$LT$T$GT$$GT$::pop::hd044437806ca7d86
+==================
 test foo ... ok
 ==================
-WARNING: ThreadSanitizer: data race (pid=30969)
-  Write of size 8 at 0x7c4c0000ed90 by thread T2:
-    #0 free $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:634 (test_runner-d861d6557762b235+0x0000000ce207)
-    #1 __rust_deallocate <null> (test_runner-d861d6557762b235+0x000000155663)
-    #2 _$LT$alloc..arc..Arc$LT$T$GT$$GT$::drop_slow::hffd2bcc3b04fe791 <null> (test_runner-d861d6557762b235+0x00000001b835)
-    #3 _$LT$alloc..arc..Arc$LT$T$GT$$GT$::drop_slow::hffd2bcc3b04fe791 <null> (test_runner-d861d6557762b235+0x00000001b835)
-    #4 drop::h62528215215ec760 <null> (test_runner-d861d6557762b235+0x000000029a65)
-    #5 drop::h62528215215ec760 <null> (test_runner-d861d6557762b235+0x000000029a65)
-    #6 _$LT$F$u20$as$u20$alloc..boxed..FnBox$LT$A$GT$$GT$::call_box::he23b8085b7ff608a <null> (test_runner-d861d6557762b235+0x00000002dc34)
-    #7 _$LT$F$u20$as$u20$alloc..boxed..FnBox$LT$A$GT$$GT$::call_box::he23b8085b7ff608a <null> (test_runner-d861d6557762b235+0x00000002dc34)
-    #8 std::sys::imp::thread::Thread::new::thread_start::hee5c0f50902195ab <null> (test_runner-d861d6557762b235+0x0000000bcacc)
-    #9 std::sys::imp::thread::Thread::new::thread_start::hee5c0f50902195ab <null> (test_runner-d861d6557762b235+0x0000000bcacc)
-    #10 __tsan_thread_start_func $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:892 (test_runner-d861d6557762b235+0x0000000caf0b)
-    #11 __tsan_thread_start_func $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:892 (test_runner-d861d6557762b235+0x0000000caf0b)
+WARNING: ThreadSanitizer: data race (pid=3733)
+  Write of size 8 at 0x7c7800006e40 by main thread:
+    #0 free $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:634 (foo-aacd724200d968b7+0x00000003cf06)
+    #1 free $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:628 (foo-aacd724200d968b7+0x00000003cf06)
+    #2 drop::hf0d57a221ac19123 <null> (foo-aacd724200d968b7+0x000000019fb1)
+    #3 __rust_maybe_catch_panic $RUST_SRC/src/libpanic_unwind/lib.rs:98 (foo-aacd724200d968b7+0x0000000d8b0a)
+    #4 __libc_start_main <null> (libc.so.6+0x000000020290)
 
-  Previous atomic write of size 8 at 0x7c4c0000ed90 by main thread:
-    #0 __tsan_atomic64_fetch_sub $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interface_atomic.cc:623 (test_runner-d861d6557762b235+0x0000001131b0)
-    #1 drop::h62528215215ec760 <null> (test_runner-d861d6557762b235+0x000000029a33)
-    #2 drop::h26c9032b0f649bf6 <null> (test_runner-d861d6557762b235+0x0000000288fd)
-    #3 drop::h26c9032b0f649bf6 <null> (test_runner-d861d6557762b235+0x0000000288fd)
-    #4 drop::h26c9032b0f649bf6 <null> (test_runner-d861d6557762b235+0x0000000288fd)
-    #5 drop::h26c9032b0f649bf6 <null> (test_runner-d861d6557762b235+0x0000000288fd)
-    #6 test::run_test::run_test_inner::h68ccb59ad7634829 <null> (test_runner-d861d6557762b235+0x000000060f65)
-    #7 test::run_test::run_test_inner::h68ccb59ad7634829 <null> (test_runner-d861d6557762b235+0x000000060f65)
-    #8 test::run_test::run_test_inner::h68ccb59ad7634829 <null> (test_runner-d861d6557762b235+0x000000060f65)
-    #9 test::run_test::hbe43efe8762b5fcb <null> (test_runner-d861d6557762b235+0x00000005f4bd)
-    #10 test::run_tests::h007db7d7a30e05b9 <null> (test_runner-d861d6557762b235+0x000000054a4a)
-    #11 test::run_tests_console::h51b8f804fcc03777 <null> (test_runner-d861d6557762b235+0x00000004db4c)
-    #12 test::test_main::h30f1de6986f689a9 <null> (test_runner-d861d6557762b235+0x0000000429d0)
-    #13 test::test_main_static::h2d9326de74ff96ef <null> (test_runner-d861d6557762b235+0x000000043fe3)
-    #14 test_runner::__test::main::h164d7dfa966cbb3f $PWD/src/lib.rs:1 (test_runner-d861d6557762b235+0x000000011362)
-    #15 std::panicking::try::do_call::hb1cd11518796216e <null> (test_runner-d861d6557762b235+0x0000000be876)
-    #16 __rust_maybe_catch_panic <null> (test_runner-d861d6557762b235+0x0000000c2363)
-    #17 __rust_maybe_catch_panic <null> (test_runner-d861d6557762b235+0x0000000c2363)
-    #18 std::rt::lang_start::h0661a76cd511ea2d <null> (test_runner-d861d6557762b235+0x0000000c0487)
-    #19 std::rt::lang_start::h0661a76cd511ea2d <null> (test_runner-d861d6557762b235+0x0000000c0487)
-    #20 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
-    #21 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
-    #22 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
+  Previous write of size 8 at 0x7c7800006e40 by thread T2:
+    #0 malloc $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:591 (foo-aacd724200d968b7+0x000000061e1f)
+    #1 alloc::heap::allocate $RUST_SRC/src/liballoc/heap.rs:59 (foo-aacd724200d968b7+0x000000014bb2)
+    #2 alloc::heap::exchange_malloc $RUST_SRC/src/liballoc/heap.rs:138 (foo-aacd724200d968b7+0x000000014bb2)
+    #3 std::sync::mpsc::mpsc_queue::{{impl}}::new<(test::TestDesc, test::TestResult, collections::vec::Vec<u8>)> $RUST_SRC/src/libstd/sync/mpsc/mpsc_queue.rs:80 (foo-aacd724200d968b7+0x000000014bb2)
+    #4 std::sync::mpsc::mpsc_queue::{{impl}}::push<(test::TestDesc, test::TestResult, collections::vec::Vec<u8>)> $RUST_SRC/src/libstd/sync/mpsc/mpsc_queue.rs:101 (foo-aacd724200d968b7+0x000000014bb2)
+    #5 std::sync::mpsc::shared::{{impl}}::send<(test::TestDesc, test::TestResult, collections::vec::Vec<u8>)> $RUST_SRC/src/libstd/sync/mpsc/shared.rs:171 (foo-aacd724200d968b7+0x000000014bb2)
+    #6 _$LT$std..sync..mpsc..Sender$LT$T$GT$$GT$::send::h1f83562f10dffde2 $RUST_SRC/src/libstd/sync/mpsc/mod.rs:607 (foo-aacd724200d968b7+0x000000014bb2)
 
-  Thread T2 'foo' (tid=30972, running) created by main thread at:
-    #0 pthread_create $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:902 (test_runner-d861d6557762b235+0x0000000cf546)
-    #1 std::sys::imp::thread::Thread::new::h59257a01c2b82abe <null> (test_runner-d861d6557762b235+0x0000000bc1ea)
-    #2 test::run_test::run_test_inner::h68ccb59ad7634829 <null> (test_runner-d861d6557762b235+0x000000060cd2)
-    #3 test::run_test::hbe43efe8762b5fcb <null> (test_runner-d861d6557762b235+0x00000005f4bd)
-    #4 test::run_test::hbe43efe8762b5fcb <null> (test_runner-d861d6557762b235+0x00000005f4bd)
-    #5 test::run_tests::h007db7d7a30e05b9 <null> (test_runner-d861d6557762b235+0x000000054a4a)
-    #6 test::run_tests_console::h51b8f804fcc03777 <null> (test_runner-d861d6557762b235+0x00000004db4c)
-    #7 test::test_main::h30f1de6986f689a9 <null> (test_runner-d861d6557762b235+0x0000000429d0)
-    #8 test::test_main_static::h2d9326de74ff96ef <null> (test_runner-d861d6557762b235+0x000000043fe3)
-    #9 test_runner::__test::main::h164d7dfa966cbb3f $PWD/src/lib.rs:1 (test_runner-d861d6557762b235+0x000000011362)
-    #10 std::panicking::try::do_call::hb1cd11518796216e <null> (test_runner-d861d6557762b235+0x0000000be876)
-    #11 __rust_maybe_catch_panic <null> (test_runner-d861d6557762b235+0x0000000c2363)
-    #12 __rust_maybe_catch_panic <null> (test_runner-d861d6557762b235+0x0000000c2363)
-    #13 std::rt::lang_start::h0661a76cd511ea2d <null> (test_runner-d861d6557762b235+0x0000000c0487)
-    #14 std::rt::lang_start::h0661a76cd511ea2d <null> (test_runner-d861d6557762b235+0x0000000c0487)
-    #15 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
-    #16 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
-    #17 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
+  Thread T2 'foo' (tid=3736, finished) created by main thread at:
+    #0 pthread_create $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:902 (foo-aacd724200d968b7+0x00000003b9a7)
+    #1 std::sys::imp::thread::Thread::new::h13e24a45e97a3e79 $RUST_SRC/src/libstd/sys/unix/thread.rs:72 (foo-aacd724200d968b7+0x0000000d0765)
+    #2 __rust_maybe_catch_panic $RUST_SRC/src/libpanic_unwind/lib.rs:98 (foo-aacd724200d968b7+0x0000000d8b0a)
+    #3 __libc_start_main <null> (libc.so.6+0x000000020290)
 
-SUMMARY: ThreadSanitizer: data race ($PWD/target/x86_64-unknown-linux-gnu/debug/deps/test_runner-d861d6557762b235+0x155663) in __rust_deallocate
-==================
-==================
-WARNING: ThreadSanitizer: data race (pid=30969)
-  Write of size 8 at 0x7c580000ef40 by main thread:
-    #0 free $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:634 (test_runner-d861d6557762b235+0x0000000ce207)
-    #1 __rust_deallocate <null> (test_runner-d861d6557762b235+0x000000155663)
-    #2 _$LT$alloc..arc..Arc$LT$T$GT$$GT$::drop_slow::hc07f22e2b818fd5e <null> (test_runner-d861d6557762b235+0x00000001b234)
-    #3 _$LT$alloc..arc..Arc$LT$T$GT$$GT$::drop_slow::hc07f22e2b818fd5e <null> (test_runner-d861d6557762b235+0x00000001b234)
-    #4 drop::hd5322f45aa23e49d <null> (test_runner-d861d6557762b235+0x00000002c005)
-    #5 drop::hd5322f45aa23e49d <null> (test_runner-d861d6557762b235+0x00000002c005)
-    #6 drop::hb2fbb6e76af21657 <null> (test_runner-d861d6557762b235+0x00000002b98e)
-    #7 drop::hb2fbb6e76af21657 <null> (test_runner-d861d6557762b235+0x00000002b98e)
-    #8 drop::ha932b14572fc49af <null> (test_runner-d861d6557762b235+0x00000002ae22)
-    #9 test::run_tests::h007db7d7a30e05b9 <null> (test_runner-d861d6557762b235+0x0000000588b1)
-    #10 test::run_tests::h007db7d7a30e05b9 <null> (test_runner-d861d6557762b235+0x0000000588b1)
-    #11 test::run_tests::h007db7d7a30e05b9 <null> (test_runner-d861d6557762b235+0x0000000588b1)
-    #12 test::run_tests_console::h51b8f804fcc03777 <null> (test_runner-d861d6557762b235+0x00000004db4c)
-    #13 test::test_main::h30f1de6986f689a9 <null> (test_runner-d861d6557762b235+0x0000000429d0)
-    #14 test::test_main_static::h2d9326de74ff96ef <null> (test_runner-d861d6557762b235+0x000000043fe3)
-    #15 test_runner::__test::main::h164d7dfa966cbb3f $PWD/src/lib.rs:1 (test_runner-d861d6557762b235+0x000000011362)
-    #16 std::panicking::try::do_call::hb1cd11518796216e <null> (test_runner-d861d6557762b235+0x0000000be876)
-    #17 __rust_maybe_catch_panic <null> (test_runner-d861d6557762b235+0x0000000c2363)
-    #18 __rust_maybe_catch_panic <null> (test_runner-d861d6557762b235+0x0000000c2363)
-    #19 std::rt::lang_start::h0661a76cd511ea2d <null> (test_runner-d861d6557762b235+0x0000000c0487)
-    #20 std::rt::lang_start::h0661a76cd511ea2d <null> (test_runner-d861d6557762b235+0x0000000c0487)
-    #21 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
-    #22 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
-    #23 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
-
-  Previous atomic write of size 8 at 0x7c580000ef40 by thread T2:
-    #0 __tsan_atomic64_fetch_sub $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interface_atomic.cc:623 (test_runner-d861d6557762b235+0x0000001131b0)
-    #1 drop::hd5322f45aa23e49d <null> (test_runner-d861d6557762b235+0x00000002bfd3)
-    #2 drop::hb2fbb6e76af21657 <null> (test_runner-d861d6557762b235+0x00000002b98e)
-    #3 drop::hb2fbb6e76af21657 <null> (test_runner-d861d6557762b235+0x00000002b98e)
-    #4 drop::hb2fbb6e76af21657 <null> (test_runner-d861d6557762b235+0x00000002b98e)
-    #5 drop::hb2fbb6e76af21657 <null> (test_runner-d861d6557762b235+0x00000002b98e)
-    #6 drop::ha932b14572fc49af <null> (test_runner-d861d6557762b235+0x00000002ae22)
-    #7 std::panicking::try::do_call::heac7d42b6d137ab0 <null> (test_runner-d861d6557762b235+0x00000001e7a7)
-    #8 std::panicking::try::do_call::heac7d42b6d137ab0 <null> (test_runner-d861d6557762b235+0x00000001e7a7)
-    #9 std::panicking::try::do_call::heac7d42b6d137ab0 <null> (test_runner-d861d6557762b235+0x00000001e7a7)
-    #10 __rust_maybe_catch_panic <null> (test_runner-d861d6557762b235+0x0000000c2363)
-    #11 __rust_maybe_catch_panic <null> (test_runner-d861d6557762b235+0x0000000c2363)
-    #12 __rust_maybe_catch_panic <null> (test_runner-d861d6557762b235+0x0000000c2363)
-    #13 _$LT$F$u20$as$u20$alloc..boxed..FnBox$LT$A$GT$$GT$::call_box::he23b8085b7ff608a <null> (test_runner-d861d6557762b235+0x00000002db21)
-    #14 _$LT$F$u20$as$u20$alloc..boxed..FnBox$LT$A$GT$$GT$::call_box::he23b8085b7ff608a <null> (test_runner-d861d6557762b235+0x00000002db21)
-    #15 std::sys::imp::thread::Thread::new::thread_start::hee5c0f50902195ab <null> (test_runner-d861d6557762b235+0x0000000bcacc)
-    #16 std::sys::imp::thread::Thread::new::thread_start::hee5c0f50902195ab <null> (test_runner-d861d6557762b235+0x0000000bcacc)
-    #17 std::sys::imp::thread::Thread::new::thread_start::hee5c0f50902195ab <null> (test_runner-d861d6557762b235+0x0000000bcacc)
-    #18 std::sys::imp::thread::Thread::new::thread_start::hee5c0f50902195ab <null> (test_runner-d861d6557762b235+0x0000000bcacc)
-    #19 __tsan_thread_start_func $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:892 (test_runner-d861d6557762b235+0x0000000caf0b)
-    #20 __tsan_thread_start_func $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:892 (test_runner-d861d6557762b235+0x0000000caf0b)
-
-  Thread T2 'foo' (tid=30972, running) created by main thread at:
-    #0 pthread_create $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:902 (test_runner-d861d6557762b235+0x0000000cf546)
-    #1 std::sys::imp::thread::Thread::new::h59257a01c2b82abe <null> (test_runner-d861d6557762b235+0x0000000bc1ea)
-    #2 test::run_test::run_test_inner::h68ccb59ad7634829 <null> (test_runner-d861d6557762b235+0x000000060cd2)
-    #3 test::run_test::hbe43efe8762b5fcb <null> (test_runner-d861d6557762b235+0x00000005f4bd)
-    #4 test::run_test::hbe43efe8762b5fcb <null> (test_runner-d861d6557762b235+0x00000005f4bd)
-    #5 test::run_tests::h007db7d7a30e05b9 <null> (test_runner-d861d6557762b235+0x000000054a4a)
-    #6 test::run_tests_console::h51b8f804fcc03777 <null> (test_runner-d861d6557762b235+0x00000004db4c)
-    #7 test::test_main::h30f1de6986f689a9 <null> (test_runner-d861d6557762b235+0x0000000429d0)
-    #8 test::test_main_static::h2d9326de74ff96ef <null> (test_runner-d861d6557762b235+0x000000043fe3)
-    #9 test_runner::__test::main::h164d7dfa966cbb3f $PWD/src/lib.rs:1 (test_runner-d861d6557762b235+0x000000011362)
-    #10 std::panicking::try::do_call::hb1cd11518796216e <null> (test_runner-d861d6557762b235+0x0000000be876)
-    #11 __rust_maybe_catch_panic <null> (test_runner-d861d6557762b235+0x0000000c2363)
-    #12 __rust_maybe_catch_panic <null> (test_runner-d861d6557762b235+0x0000000c2363)
-    #13 std::rt::lang_start::h0661a76cd511ea2d <null> (test_runner-d861d6557762b235+0x0000000c0487)
-    #14 std::rt::lang_start::h0661a76cd511ea2d <null> (test_runner-d861d6557762b235+0x0000000c0487)
-    #15 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
-    #16 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
-    #17 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
-
-SUMMARY: ThreadSanitizer: data race ($PWD/target/x86_64-unknown-linux-gnu/debug/deps/test_runner-d861d6557762b235+0x155663) in __rust_deallocate
+SUMMARY: ThreadSanitizer: data race ($PWD/target/x86_64-unknown-linux-gnu/debug/deps/foo-aacd724200d968b7+0x19fb1) in drop::hf0d57a221ac19123
 ==================
 
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured
 
-==================
-WARNING: ThreadSanitizer: data race (pid=30969)
-  Write of size 8 at 0x7c540000ef60 by thread T2:
-    #0 free $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:634 (test_runner-d861d6557762b235+0x0000000ce207)
-    #1 __rust_deallocate <null> (test_runner-d861d6557762b235+0x000000155663)
-    #2 _$LT$alloc..arc..Arc$LT$T$GT$$GT$::drop_slow::hff346d8fec1237f8 <null> (test_runner-d861d6557762b235+0x00000009fbc4)
-    #3 _$LT$alloc..arc..Arc$LT$T$GT$$GT$::drop_slow::hff346d8fec1237f8 <null> (test_runner-d861d6557762b235+0x00000009fbc4)
-    #4 drop::h5f9d93ca09665cd2 <null> (test_runner-d861d6557762b235+0x0000000a395d)
-    #5 drop::h5f9d93ca09665cd2 <null> (test_runner-d861d6557762b235+0x0000000a395d)
-    #6 drop::h1a3c63fc24632ae0 <null> (test_runner-d861d6557762b235+0x0000000a34bf)
-    #7 drop::h1a3c63fc24632ae0 <null> (test_runner-d861d6557762b235+0x0000000a34bf)
-    #8 drop::h1a3c63fc24632ae0 <null> (test_runner-d861d6557762b235+0x0000000a34bf)
-    #9 std::sys::imp::fast_thread_local::destroy_value::hd0a16359cb28bafd <null> (test_runner-d861d6557762b235+0x0000000b9518)
-    #10 std::sys::imp::fast_thread_local::destroy_value::hd0a16359cb28bafd <null> (test_runner-d861d6557762b235+0x0000000b9518)
-    #11 std::sys::imp::fast_thread_local::destroy_value::hd0a16359cb28bafd <null> (test_runner-d861d6557762b235+0x0000000b9518)
-    #12 __GI___call_tls_dtors <null> (libc.so.6+0x000000035efe)
-    #13 __GI___call_tls_dtors <null> (libc.so.6+0x000000035efe)
-    #14 __GI___call_tls_dtors <null> (libc.so.6+0x000000035efe)
-
-  Previous atomic write of size 8 at 0x7c540000ef60 by main thread:
-    #0 __tsan_atomic64_fetch_sub $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interface_atomic.cc:623 (test_runner-d861d6557762b235+0x0000001131b0)
-    #1 drop::h76fdafd6e6eb83b7 <null> (test_runner-d861d6557762b235+0x00000002a0fb)
-    #2 drop::h26c9032b0f649bf6 <null> (test_runner-d861d6557762b235+0x0000000288e9)
-    #3 drop::h26c9032b0f649bf6 <null> (test_runner-d861d6557762b235+0x0000000288e9)
-    #4 drop::h26c9032b0f649bf6 <null> (test_runner-d861d6557762b235+0x0000000288e9)
-    #5 drop::h26c9032b0f649bf6 <null> (test_runner-d861d6557762b235+0x0000000288e9)
-    #6 drop::h26c9032b0f649bf6 <null> (test_runner-d861d6557762b235+0x0000000288e9)
-    #7 test::run_test::run_test_inner::h68ccb59ad7634829 <null> (test_runner-d861d6557762b235+0x000000060f65)
-    #8 test::run_test::run_test_inner::h68ccb59ad7634829 <null> (test_runner-d861d6557762b235+0x000000060f65)
-    #9 test::run_test::hbe43efe8762b5fcb <null> (test_runner-d861d6557762b235+0x00000005f4bd)
-    #10 test::run_tests::h007db7d7a30e05b9 <null> (test_runner-d861d6557762b235+0x000000054a4a)
-    #11 test::run_tests_console::h51b8f804fcc03777 <null> (test_runner-d861d6557762b235+0x00000004db4c)
-    #12 test::test_main::h30f1de6986f689a9 <null> (test_runner-d861d6557762b235+0x0000000429d0)
-    #13 test::test_main_static::h2d9326de74ff96ef <null> (test_runner-d861d6557762b235+0x000000043fe3)
-    #14 test_runner::__test::main::h164d7dfa966cbb3f $PWD/src/lib.rs:1 (test_runner-d861d6557762b235+0x000000011362)
-    #15 std::panicking::try::do_call::hb1cd11518796216e <null> (test_runner-d861d6557762b235+0x0000000be876)
-    #16 __rust_maybe_catch_panic <null> (test_runner-d861d6557762b235+0x0000000c2363)
-    #17 __rust_maybe_catch_panic <null> (test_runner-d861d6557762b235+0x0000000c2363)
-    #18 std::rt::lang_start::h0661a76cd511ea2d <null> (test_runner-d861d6557762b235+0x0000000c0487)
-    #19 std::rt::lang_start::h0661a76cd511ea2d <null> (test_runner-d861d6557762b235+0x0000000c0487)
-    #20 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
-    #21 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
-    #22 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
-
-  Thread T2 'foo' (tid=30972, running) created by main thread at:
-    #0 pthread_create $RUST_SRC/src/compiler-rt/lib/tsan/rtl/tsan_interceptors.cc:902 (test_runner-d861d6557762b235+0x0000000cf546)
-    #1 std::sys::imp::thread::Thread::new::h59257a01c2b82abe <null> (test_runner-d861d6557762b235+0x0000000bc1ea)
-    #2 test::run_test::run_test_inner::h68ccb59ad7634829 <null> (test_runner-d861d6557762b235+0x000000060cd2)
-    #3 test::run_test::hbe43efe8762b5fcb <null> (test_runner-d861d6557762b235+0x00000005f4bd)
-    #4 test::run_test::hbe43efe8762b5fcb <null> (test_runner-d861d6557762b235+0x00000005f4bd)
-    #5 test::run_tests::h007db7d7a30e05b9 <null> (test_runner-d861d6557762b235+0x000000054a4a)
-    #6 test::run_tests_console::h51b8f804fcc03777 <null> (test_runner-d861d6557762b235+0x00000004db4c)
-    #7 test::test_main::h30f1de6986f689a9 <null> (test_runner-d861d6557762b235+0x0000000429d0)
-    #8 test::test_main_static::h2d9326de74ff96ef <null> (test_runner-d861d6557762b235+0x000000043fe3)
-    #9 test_runner::__test::main::h164d7dfa966cbb3f $PWD/src/lib.rs:1 (test_runner-d861d6557762b235+0x000000011362)
-    #10 std::panicking::try::do_call::hb1cd11518796216e <null> (test_runner-d861d6557762b235+0x0000000be876)
-    #11 __rust_maybe_catch_panic <null> (test_runner-d861d6557762b235+0x0000000c2363)
-    #12 __rust_maybe_catch_panic <null> (test_runner-d861d6557762b235+0x0000000c2363)
-    #13 std::rt::lang_start::h0661a76cd511ea2d <null> (test_runner-d861d6557762b235+0x0000000c0487)
-    #14 std::rt::lang_start::h0661a76cd511ea2d <null> (test_runner-d861d6557762b235+0x0000000c0487)
-    #15 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
-    #16 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
-    #17 main <null> (test_runner-d861d6557762b235+0x0000000113b7)
-
-SUMMARY: ThreadSanitizer: data race ($PWD/target/x86_64-unknown-linux-gnu/debug/deps/test_runner-d861d6557762b235+0x155663) in __rust_deallocate
-==================
 ThreadSanitizer: reported 3 warnings
 error: test failed
 ```
+
+Workaround: `export RUST_TEST_THREADS=1` to run your test suite sequentially.
 
 # License
 
