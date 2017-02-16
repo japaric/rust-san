@@ -26,7 +26,7 @@
       
 ## Intro
 
-As of [nightly-2017-02-XX](https://github.com/rust-lang/rust/pull/38699),
+As of [nightly-2017-02-15](https://github.com/rust-lang/rust/pull/38699),
 `rustc` ships with **experimental** support for the following sanitizers: 
 
 - [AddressSanitizer](https://clang.llvm.org/docs/AddressSanitizer.html)
