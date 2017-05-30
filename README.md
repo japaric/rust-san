@@ -23,11 +23,11 @@
   - [ThreadSanitizer: Data race in the test runner](#threadsanitizer-data-race-in-the-test-runner)
 - [License](#license)
   - [Contribution](#contribution)
-      
+
 ## Intro
 
 As of [nightly-2017-02-15](https://github.com/rust-lang/rust/pull/38699),
-`rustc` ships with **experimental** support for the following sanitizers: 
+`rustc` ships with **experimental** support for the following sanitizers:
 
 - [AddressSanitizer](https://clang.llvm.org/docs/AddressSanitizer.html)
 
@@ -37,7 +37,8 @@ As of [nightly-2017-02-15](https://github.com/rust-lang/rust/pull/38699),
 
 - [ThreadSanitizer](https://clang.llvm.org/docs/ThreadSanitizer.html)
 
-Note that sanitizer support is **only** available on x86_64 Linux.
+Note that sanitizer support is available on x86_64 Linux and on x86_64 macOS
+(ASan and TSan only).
 
 ## How to use the sanitizers?
 
@@ -61,7 +62,7 @@ compilation error if your crate depends on a dylib.
 ## Examples
 
 This section shows what kind of issues can be detected with the sanitizers
-through some examples that you can find in this repository 
+through some examples that you can find in this repository
 
 ### AddressSanitizer
 
@@ -239,7 +240,7 @@ fn main() {
 
 ```
 $ ( cd lsan && \
-    RUSTFLAGS="-Z sanitizer=leak" cargo run --target x86_64-unknown-linux-gnu --example memory-leak ) 
+    RUSTFLAGS="-Z sanitizer=leak" cargo run --target x86_64-unknown-linux-gnu --example memory-leak )
      Running `target/x86_64-unknown-linux-gnu/debug/examples/memory-leak`
 
 =================================================================
@@ -451,7 +452,7 @@ index 8146e7fb1e..c013995255 100644
  path = "lib.rs"
 -crate-type = ["dylib", "rlib"]
 +# crate-type = ["dylib", "rlib"]
- 
+
  [dependencies]
  alloc = { path = "../liballoc" }
 diff --git a/src/libterm/Cargo.toml b/src/libterm/Cargo.toml
@@ -474,7 +475,7 @@ index ecbd5a9c0f..553150cdd1 100644
  path = "lib.rs"
 -crate-type = ["dylib", "rlib"]
 +# crate-type = ["dylib", "rlib"]
- 
+
  [dependencies]
  getopts = { path = "../libgetopts" }
 
@@ -486,7 +487,7 @@ index ecbd5a9c0f..553150cdd1 100644
 
 I have found that LeakSanitizer not always catches memory leaks *unless* you
 have compiled your code with `-C opt-level=1` or better. You can change the
-optimization level of the `dev` profile in your `Cargo.toml` like this: 
+optimization level of the `dev` profile in your `Cargo.toml` like this:
 
 ``` toml
 # Cargo.toml
