@@ -21,6 +21,7 @@
   - [CARGO_INCREMENTAL](#cargo_incremental)
   - [MemorySanitizer: Use of uninitialized value in the test runner](#memorysanitizer-use-of-uninitialized-value-in-the-test-runner)
   - [ThreadSanitizer: Data race in the test runner](#threadsanitizer-data-race-in-the-test-runner)
+  - [Suppression of False Positives](#suppression-of-false-positives)
 - [License](#license)
   - [Contribution](#contribution)
 
@@ -667,6 +668,92 @@ error: test failed
 ```
 
 Workaround: `export RUST_TEST_THREADS=1` to run your test suite sequentially.
+
+### Suppression of False Positives
+
+There are some cases where the sanitizers will generate false positives, such as reporting data races in code that uses `std::sync::atomic::fence`, or unsafe pointer usage while relying on the ordering semantics of adjacent barriers. This can generate a ton of noise, as popular libraries like `lazy_static` can trigger this.
+
+```
+WARNING: ThreadSanitizer: data race (pid=30975)                                                                                      
+  Read of size 8 at 0x55ddb40e5418 by thread T2:                                                                                                                         
+    #0 _$LT$lazy_static..lazy..Lazy$LT$T$GT$$GT$::get::hb947a249eaade5b0 /home/t/.cargo/registry/src/github.com-1ecc6299db9ec823/lazy_static-0.2.8/src/lazy.rs:26 (stress+0x279323)
+    #1 rayon_core::log::{{impl}}::deref::__stability /home/t/src/rsdb/<__lazy_static_internal macros>:20 (stress+0x2a8520)
+    #2 _$LT$rayon_core..log..LOG_ENV$u20$as$u20$core..ops..deref..Deref$GT$::deref::h995f5b423216fc8c /home/t/src/rsdb/<__lazy_static_internal macros>:21 (stress+0x2a8520)                      
+    #3 rayon_core::registry::WorkerThread::wait_until::h14e38df285736ca7 /home/t/src/rsdb/rayon/rayon-core/src/registry.rs:434 (stress+0x2a0ac1)
+    #4 rayon_core::registry::WorkerThread::wait_until::h14e38df285736ca7 /home/t/src/rsdb/rayon/rayon-core/src/registry.rs:434 (stress+0x2a0ac1)                                                      
+    #5 rayon_core::registry::main_loop::h120d26ee2b06f3e1 /home/t/src/rsdb/rayon/rayon-core/src/registry.rs:559 (stress+0x2a2ba3)
+    #6 rayon_core::registry::Registry::new::_$u7b$$u7b$closure$u7d$$u7d$::h73e776a16b1aafcd /home/t/src/rsdb/rayon/rayon-core/src/registry.rs:145 (stress+0x2a87fa)
+    #7 std::sys_common::backtrace::__rust_begin_short_backtrace::h70e0fa277eccaded /checkout/src/libstd/sys_common/backtrace.rs:136 (stress+0x274b63)
+    #8 std::thread::Builder::spawn::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::h73f1afe39e3f5d92 /checkout/src/libstd/thread/mod.rs:364 (stress+0x2772e9)
+    #9 _$LT$std..panic..AssertUnwindSafe$LT$F$GT$$u20$as$u20$core..ops..function..FnOnce$LT$$LP$$RP$$GT$$GT$::call_once::h0fef211ea8e53025 /checkout/src/libstd/panic.rs:296 (stress+0x269582)
+    #10 std::panicking::try::do_call::h0164d0443475d14d /checkout/src/libstd/panicking.rs:479 (stress+0x277ab3)                                      
+    #11 __rust_maybe_catch_panic /checkout/src/libpanic_unwind/lib.rs:98 (stress+0x30999c)                                                                                
+    #12 std::panic::catch_unwind::h0f7a13324f48e132 /checkout/src/libstd/panic.rs:361 (stress+0x2761bb)                                                                                       
+    #13 std::thread::Builder::spawn::_$u7b$$u7b$closure$u7d$$u7d$::h8fabb47bf4134341 /checkout/src/libstd/thread/mod.rs:363 (stress+0x277091)                                                         
+    #14 _$LT$F$u20$as$u20$alloc..boxed..FnBox$LT$A$GT$$GT$::call_box::h34535139aa115aa0 /checkout/src/liballoc/boxed.rs:652 (stress+0x29081f)
+    #15 alloc::boxed::{{impl}}::call_once<(),()> /checkout/src/liballoc/boxed.rs:662 (stress+0x30169b)      
+    #16 std::sys_common::thread::start_thread /checkout/src/libstd/sys_common/thread.rs:21 (stress+0x30169b)                                    
+    #17 std::sys::imp::thread::Thread::new::thread_start::h3eac17b79d7b9487 /checkout/src/libstd/sys/unix/thread.rs:84 (stress+0x30169b)     
+                                                                                                                                                                   
+  Previous write of size 8 at 0x55ddb40e5418 by thread T1:                                                                                           
+    #0 _$LT$lazy_static..lazy..Lazy$LT$T$GT$$GT$::get::_$u7b$$u7b$closure$u7d$$u7d$::he4e15a492cb08e5f /home/t/.cargo/registry/src/github.com-1ecc6299db9ec823/lazy_static-0.2.8/src/lazy.rs:23 (stress+0x27946f)
+    #1 std::sync::once::Once::call_once::_$u7b$$u7b$closure$u7d$$u7d$::hecb03b941ecc49ae /checkout/src/libstd/sync/once.rs:227 (stress+0x2755f3)                                              
+    #2 std::sync::once::Once::call_inner::h7a6867e4a5c8eee6 /checkout/src/libstd/sync/once.rs:307 (stress+0x2fbe2c)
+    #3 _$LT$lazy_static..lazy..Lazy$LT$T$GT$$GT$::get::hb947a249eaade5b0 /home/t/.cargo/registry/src/github.com-1ecc6299db9ec823/lazy_static-0.2.8/src/lazy.rs:22 (stress+0x27930e)
+    #4 rayon_core::log::{{impl}}::deref::__stability /home/t/src/rsdb/<__lazy_static_internal macros>:20 (stress+0x2a8520)
+    #5 _$LT$rayon_core..log..LOG_ENV$u20$as$u20$core..ops..deref..Deref$GT$::deref::h995f5b423216fc8c /home/t/src/rsdb/<__lazy_static_internal macros>:21 (stress+0x2a8520)
+    #6 rayon_core::registry::WorkerThread::wait_until::h14e38df285736ca7 /home/t/src/rsdb/rayon/rayon-core/src/registry.rs:434 (stress+0x2a0ac1)
+    #7 rayon_core::registry::WorkerThread::wait_until::h14e38df285736ca7 /home/t/src/rsdb/rayon/rayon-core/src/registry.rs:434 (stress+0x2a0ac1)
+    #8 rayon_core::registry::main_loop::h120d26ee2b06f3e1 /home/t/src/rsdb/rayon/rayon-core/src/registry.rs:559 (stress+0x2a2ba3)
+    #9 rayon_core::registry::Registry::new::_$u7b$$u7b$closure$u7d$$u7d$::h73e776a16b1aafcd /home/t/src/rsdb/rayon/rayon-core/src/registry.rs:145 (stress+0x2a87fa)
+    #10 std::sys_common::backtrace::__rust_begin_short_backtrace::h70e0fa277eccaded /checkout/src/libstd/sys_common/backtrace.rs:136 (stress+0x274b63)
+    #11 std::thread::Builder::spawn::_$u7b$$u7b$closure$u7d$$u7d$::_$u7b$$u7b$closure$u7d$$u7d$::h73f1afe39e3f5d92 /checkout/src/libstd/thread/mod.rs:364 (stress+0x2772e9)
+    #12 _$LT$std..panic..AssertUnwindSafe$LT$F$GT$$u20$as$u20$core..ops..function..FnOnce$LT$$LP$$RP$$GT$$GT$::call_once::h0fef211ea8e53025 /checkout/src/libstd/panic.rs:296 (stress+0x269582)
+    #13 std::panicking::try::do_call::h0164d0443475d14d /checkout/src/libstd/panicking.rs:479 (stress+0x277ab3)
+    #14 __rust_maybe_catch_panic /checkout/src/libpanic_unwind/lib.rs:98 (stress+0x30999c)
+    #15 std::panic::catch_unwind::h0f7a13324f48e132 /checkout/src/libstd/panic.rs:361 (stress+0x2761bb)
+    #16 std::thread::Builder::spawn::_$u7b$$u7b$closure$u7d$$u7d$::h8fabb47bf4134341 /checkout/src/libstd/thread/mod.rs:363 (stress+0x277091)
+    #17 _$LT$F$u20$as$u20$alloc..boxed..FnBox$LT$A$GT$$GT$::call_box::h34535139aa115aa0 /checkout/src/liballoc/boxed.rs:652 (stress+0x29081f)
+    #18 alloc::boxed::{{impl}}::call_once<(),()> /checkout/src/liballoc/boxed.rs:662 (stress+0x30169b)
+    #19 std::sys_common::thread::start_thread /checkout/src/libstd/sys_common/thread.rs:21 (stress+0x30169b)
+    #20 std::sys::imp::thread::Thread::new::thread_start::h3eac17b79d7b9487 /checkout/src/libstd/sys/unix/thread.rs:84 (stress+0x30169b)
+
+  Location is global '_$LT$rayon_core..log..LOG_ENV$u20$as$u20$core..ops..deref..Deref$GT$::deref::__stability::LAZY::h79a6f8f41963a1dd' of size 16 at 0x55ddb40e5418 (stress+0x0000013d5418)
+```
+
+These errors can be suppressed by setting the `TSAN_OPTIONS` environment variable, and providing a suppressions configuration file:
+
+```
+export TSAN_OPTIONS="suppressions=blacklist.txt"
+```
+
+Where the configuration file looks something like this:
+
+```
+# Library foobar is full of races.
+# Filed bug 123, but do not want to deal with it now.
+race:foobar
+
+# The function turns to be racy. Bug 345.
+race:NuclearRocket::Launch
+
+# The race is introduced in patch 456. Bug 567.
+race:src/surgery/laser_scalpel.cc
+
+# Global var global_var is racy. Bug 568.
+race:global_var
+
+# short() function is racy, but not match any other functions containing "short". Bug 569.
+race:^short$
+
+# The following thread leaks. Bug 678.
+thread:MonitoringThread
+
+# Uninstrumented library.
+called_from_lib:libzmq.so
+```
+
+You can find additional documentation for the LLVM suppression file [here](https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions).
 
 # License
 
