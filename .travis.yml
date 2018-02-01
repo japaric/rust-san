@@ -1,0 +1,6 @@
+language: rust
+rust: nightly
+dist: trusty
+
+script:
+  - ci/run.sh
