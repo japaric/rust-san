@@ -53,22 +53,18 @@ RUSTFLAGS="-Z sanitizer=memory" cargo run --example uninitialized-read-fixed --t
 # LSan tests
 cd ../lsan
 
-# On my machine LeakSanitizer doesn't ever detect any leaks.
-# On Travis-CI, LeakSanitizer always fail with a fatal error
-# because of: https://github.com/travis-ci/travis-ci/issues/9033.
-
 # Broken tests: these should fail
-# These tests don't fail on my machine for some reason but they should: 
+# These tests don't fail but they should:
 # ! RUSTFLAGS="-Z sanitizer=leak" cargo run --example memory-leak --target x86_64-unknown-linux-gnu
 # ! RUSTFLAGS="-Z sanitizer=leak" cargo run --example rc-cycle --target x86_64-unknown-linux-gnu
 # ! RUSTFLAGS="-Z sanitizer=leak" cargo run --example memory-leak --target x86_64-unknown-linux-gnu --release
 # ! RUSTFLAGS="-Z sanitizer=leak" cargo run --example rc-cycle --target x86_64-unknown-linux-gnu -- release
 
 # Fixed tests: these should pass (they do pass on my machine)
-# RUSTFLAGS="-Z sanitizer=leak" cargo run --example memory-leak-fixed --target x86_64-unknown-linux-gnu
-# RUSTFLAGS="-Z sanitizer=leak" cargo run --example memory-leak-fixed --target x86_64-unknown-linux-gnu --release
-# RUSTFLAGS="-Z sanitizer=leak" cargo run --example rc-cycle-fixed --target x86_64-unknown-linux-gnu
-# RUSTFLAGS="-Z sanitizer=leak" cargo run --example rc-cycle-fixed --target x86_64-unknown-linux-gnu --release
+RUSTFLAGS="-Z sanitizer=leak" cargo run --example memory-leak-fixed --target x86_64-unknown-linux-gnu
+RUSTFLAGS="-Z sanitizer=leak" cargo run --example memory-leak-fixed --target x86_64-unknown-linux-gnu --release
+RUSTFLAGS="-Z sanitizer=leak" cargo run --example rc-cycle-fixed --target x86_64-unknown-linux-gnu
+RUSTFLAGS="-Z sanitizer=leak" cargo run --example rc-cycle-fixed --target x86_64-unknown-linux-gnu --release
 
 # TSan tests
 cd ../tsan

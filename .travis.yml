@@ -1,5 +1,6 @@
 language: rust
 rust: nightly
+sudo: true
 
 script:
   - ci/run.sh
