@@ -73,8 +73,12 @@ script:
   - RUSTFLAGS="-Z sanitizer=thread" cargo run --example data-race-fixed --target x86_64-unknown-linux-gnu --release
 
   # Test harness (pass):
-  - ! RUSTFLAGS="-Z sanitizer=thread" cargo test --target x86_64-unknown-linux-gnu
-  - ! RUSTFLAGS="-Z sanitizer=thread" cargo test --target x86_64-unknown-linux-gnu --release
+  # Fails because of https://github.com/rust-lang/rust/issues/39608
+  # - RUSTFLAGS="-Z sanitizer=thread" cargo test --target x86_64-unknown-linux-gnu
+  # - RUSTFLAGS="-Z sanitizer=thread" cargo test --target x86_64-unknown-linux-gnu --release
+  # setting RUST_TEST_THREADS=1 fixes it:
+  - RUST_TEST_THREADS=1 RUSTFLAGS="-Z sanitizer=thread" cargo test --target x86_64-unknown-linux-gnu
+  - RUST_TEST_THREADS=1 RUSTFLAGS="-Z sanitizer=thread" cargo test --target x86_64-unknown-linux-gnu --release
 
   # Test harness (fail):
   - ! RUSTFLAGS="-Z sanitizer=thread" cargo test --features fail --target x86_64-unknown-linux-gnu
