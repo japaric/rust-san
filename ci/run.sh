@@ -5,6 +5,9 @@ set -ex
 # ASan tests
 cd asan
 
+# Without this ASan fails under travis although it works in my machine.
+export ASAN_OPTIONS="detect_leaks=0"
+
 # Broken tests: these should fail
 ! RUSTFLAGS="-Z sanitizer=address" cargo run --example out-of-bounds --target x86_64-unknown-linux-gnu
 ! RUSTFLAGS="-Z sanitizer=address" cargo run --example use-after-free --target x86_64-unknown-linux-gnu
