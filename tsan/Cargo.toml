@@ -2,3 +2,7 @@
 authors = ["Jorge Aparicio <japaricious@gmail.com>"]
 name = "tsan"
 version = "0.1.0"
+
+[features]
+# Enable tests that fail
+fail = []
