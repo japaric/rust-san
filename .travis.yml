@@ -1,6 +1,5 @@
 language: rust
 rust: nightly
-sudo: required
 dist: trusty
 
 script:
